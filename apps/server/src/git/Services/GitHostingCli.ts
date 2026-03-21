@@ -1,8 +1,15 @@
 /**
  * GitHostingCli - Provider-agnostic service contract for hosting platform CLI operations.
  *
- * Abstracts over GitHub CLI (`gh`) and Azure DevOps CLI (`az repos`) so that
- * GitManager can work with either hosting provider transparently.
+ * Abstracts over platform-specific CLIs (GitHub `gh`, Azure DevOps `az repos`,
+ * and future providers like GitLab `glab`, Bitbucket, etc.) so that
+ * GitManager can work with any hosting provider transparently.
+ *
+ * To add a new provider:
+ * 1. Register it in hosting.ts (provider registration list)
+ * 2. Create a Services/<Provider>Cli.ts interface
+ * 3. Create a Layers/<Provider>Cli.ts implementation
+ * 4. Register the adapter in Layers/GitHostingCliResolver.ts
  *
  * @module GitHostingCli
  */
@@ -11,7 +18,7 @@ import type { Effect } from "effect";
 
 import type { ProcessRunResult } from "../../processRunner";
 import type { GitHostingCliError } from "../Errors.ts";
-import type { GitHostingProvider } from "../hosting.ts";
+import type { GitHostingProviderKind } from "../hosting.ts";
 
 export interface HostingPullRequestSummary {
   readonly number: number;
@@ -35,8 +42,8 @@ export interface HostingRepositoryCloneUrls {
  * GitHostingCliShape - Provider-agnostic service API for hosting platform CLI commands.
  */
 export interface GitHostingCliShape {
-  /** The detected hosting provider for this instance. */
-  readonly provider: GitHostingProvider;
+  /** The detected hosting provider kind for this instance. */
+  readonly provider: GitHostingProviderKind;
 
   /** Execute a hosting CLI command and return full process output. */
   readonly execute: (input: {

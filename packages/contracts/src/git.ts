@@ -6,7 +6,11 @@ const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 
 // Domain Types
 
-export const GitHostingProvider = Schema.Literals(["github", "azure-devops"]);
+/**
+ * Known hosting provider identifiers. Uses String schema for extensibility —
+ * new providers (gitlab, bitbucket, etc.) can be added without contract changes.
+ */
+export const GitHostingProvider = Schema.String;
 export type GitHostingProvider = typeof GitHostingProvider.Type;
 
 export const GitStackedAction = Schema.Literals(["commit", "commit_push", "commit_push_pr"]);

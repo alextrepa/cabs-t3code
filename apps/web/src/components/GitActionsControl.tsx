@@ -135,31 +135,54 @@ const COMMIT_DIALOG_TITLE = "Commit changes";
 const COMMIT_DIALOG_DESCRIPTION =
   "Review and confirm your commit. Leave the message blank to auto-generate one.";
 
-function HostingIcon({ className, isAzure }: { className?: string; isAzure?: boolean }) {
-  return isAzure ? <AzureDevOpsIcon className={className} /> : <GitHubIcon className={className} />;
+/**
+ * Maps hosting provider kind to its icon component.
+ * Add new providers here when adding GitLab, Bitbucket, etc.
+ */
+const HOSTING_ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
+  github: GitHubIcon,
+  "azure-devops": AzureDevOpsIcon,
+  // Future: "gitlab": GitLabIcon, "bitbucket": BitbucketIcon, etc.
+};
+
+function HostingIcon({
+  className,
+  provider,
+}: {
+  className?: string;
+  provider?: string;
+}) {
+  const IconComponent = (provider && HOSTING_ICON_MAP[provider]) || GitHubIcon;
+  return <IconComponent className={className} />;
 }
 
-function GitActionItemIcon({ icon, isAzure }: { icon: GitActionIconName; isAzure?: boolean }) {
+function GitActionItemIcon({
+  icon,
+  hostingProvider,
+}: {
+  icon: GitActionIconName;
+  hostingProvider?: string;
+}) {
   if (icon === "commit") return <GitCommitIcon />;
   if (icon === "push") return <CloudUploadIcon />;
-  return <HostingIcon isAzure={isAzure} />;
+  return <HostingIcon provider={hostingProvider} />;
 }
 
 function GitQuickActionIcon({
   quickAction,
-  isAzure,
+  hostingProvider,
 }: {
   quickAction: GitQuickAction;
-  isAzure?: boolean;
+  hostingProvider?: string;
 }) {
   const iconClassName = "size-3.5";
   if (quickAction.kind === "open_pr")
-    return <HostingIcon className={iconClassName} isAzure={isAzure} />;
+    return <HostingIcon className={iconClassName} provider={hostingProvider} />;
   if (quickAction.kind === "run_pull") return <InfoIcon className={iconClassName} />;
   if (quickAction.kind === "run_action") {
     if (quickAction.action === "commit") return <GitCommitIcon className={iconClassName} />;
     if (quickAction.action === "commit_push") return <CloudUploadIcon className={iconClassName} />;
-    return <HostingIcon className={iconClassName} isAzure={isAzure} />;
+    return <HostingIcon className={iconClassName} provider={hostingProvider} />;
   }
   if (quickAction.label === "Commit") return <GitCommitIcon className={iconClassName} />;
   return <InfoIcon className={iconClassName} />;
@@ -185,7 +208,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
   // Default to true while loading so we don't flash init controls.
   const isRepo = branchList?.isRepo ?? true;
   const hasOriginRemote = branchList?.hasOriginRemote ?? false;
-  const isAzureDevOps = gitStatus?.hostingProvider === "azure-devops";
+  const hostingProvider = gitStatus?.hostingProvider;
   const currentBranch = branchList?.branches.find((branch) => branch.current)?.name ?? null;
   const isGitStatusOutOfSync =
     !!gitStatus?.branch && !!currentBranch && gitStatus.branch !== currentBranch;
@@ -672,7 +695,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                   />
                 }
               >
-                <GitQuickActionIcon quickAction={quickAction} isAzure={isAzureDevOps} />
+                <GitQuickActionIcon quickAction={quickAction} hostingProvider={hostingProvider} />
                 <span className="sr-only @sm/header-actions:not-sr-only @sm/header-actions:ml-0.5">
                   {quickAction.label}
                 </span>
@@ -688,7 +711,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
               disabled={isGitActionRunning || quickAction.disabled}
               onClick={runQuickAction}
             >
-              <GitQuickActionIcon quickAction={quickAction} isAzure={isAzureDevOps} />
+              <GitQuickActionIcon quickAction={quickAction} hostingProvider={hostingProvider} />
               <span className="sr-only @sm/header-actions:not-sr-only @sm/header-actions:ml-0.5">
                 {quickAction.label}
               </span>
@@ -723,7 +746,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                         render={<span className="block w-max cursor-not-allowed" />}
                       >
                         <MenuItem className="w-full" disabled>
-                          <GitActionItemIcon icon={item.icon} isAzure={isAzureDevOps} />
+                          <GitActionItemIcon icon={item.icon} hostingProvider={hostingProvider} />
                           {item.label}
                         </MenuItem>
                       </PopoverTrigger>
@@ -742,7 +765,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
                       openDialogForMenuItem(item);
                     }}
                   >
-                    <GitActionItemIcon icon={item.icon} isAzure={isAzureDevOps} />
+                    <GitActionItemIcon icon={item.icon} hostingProvider={hostingProvider} />
                     {item.label}
                   </MenuItem>
                 );

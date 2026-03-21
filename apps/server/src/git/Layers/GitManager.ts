@@ -13,7 +13,11 @@ import { GitManager, type GitManagerShape } from "../Services/GitManager.ts";
 import { GitCore } from "../Services/GitCore.ts";
 import { GitHostingCli } from "../Services/GitHostingCli.ts";
 import { TextGeneration } from "../Services/TextGeneration.ts";
-import { detectHostingProvider } from "../hosting.ts";
+import {
+  detectHostingProvider,
+  getProviderRegistration,
+  parseRepositoryNameWithOwnerFromRemoteUrl as parseRepoNameFromUrl,
+} from "../hosting.ts";
 
 interface OpenPrInfo {
   number: number;
@@ -94,49 +98,6 @@ function resolvePullRequestWorktreeLocalBranchName(
   return `t3code/pr-${pullRequest.number}/${suffix}`;
 }
 
-function parseGitHubRepositoryNameWithOwnerFromRemoteUrl(url: string | null): string | null {
-  const trimmed = url?.trim() ?? "";
-  if (trimmed.length === 0) {
-    return null;
-  }
-
-  const match =
-    /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https:\/\/github\.com\/|git:\/\/github\.com\/)([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/i.exec(
-      trimmed,
-    );
-  const repositoryNameWithOwner = match?.[1]?.trim() ?? "";
-  return repositoryNameWithOwner.length > 0 ? repositoryNameWithOwner : null;
-}
-
-function parseRepositoryNameWithOwnerFromRemoteUrl(url: string | null): string | null {
-  // Try GitHub first
-  const github = parseGitHubRepositoryNameWithOwnerFromRemoteUrl(url);
-  if (github) return github;
-
-  // Try Azure DevOps: extract project/repo as nameWithOwner equivalent
-  const trimmed = url?.trim() ?? "";
-  if (trimmed.length === 0) return null;
-
-  // https://dev.azure.com/{org}/{project}/_git/{repo}
-  const azureHttps =
-    /^https?:\/\/(?:[^@]+@)?dev\.azure\.com\/[^/]+\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?\/?$/i.exec(
-      trimmed,
-    );
-  if (azureHttps) return `${azureHttps[1]}/${azureHttps[2]}`;
-
-  // git@ssh.dev.azure.com:v3/{org}/{project}/{repo}
-  const azureSsh = /^git@ssh\.dev\.azure\.com:v3\/[^/]+\/([^/]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(
-    trimmed,
-  );
-  if (azureSsh) return `${azureSsh[1]}/${azureSsh[2]}`;
-
-  // https://{org}.visualstudio.com/{project}/_git/{repo}
-  const azureVsts =
-    /^https?:\/\/[^.]+\.visualstudio\.com\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?\/?$/i.exec(trimmed);
-  if (azureVsts) return `${azureVsts[1]}/${azureVsts[2]}`;
-
-  return null;
-}
 
 function parseRepositoryOwnerLogin(nameWithOwner: string | null): string | null {
   const trimmed = nameWithOwner?.trim() ?? "";
@@ -481,7 +442,7 @@ export const makeGitManager = Effect.gen(function* () {
       }
 
       const remoteUrl = yield* readConfigValueNullable(cwd, `remote.${remoteName}.url`);
-      const repositoryNameWithOwner = parseRepositoryNameWithOwnerFromRemoteUrl(remoteUrl);
+      const repositoryNameWithOwner = parseRepoNameFromUrl(remoteUrl);
       return {
         repositoryNameWithOwner,
         ownerLogin: parseRepositoryOwnerLogin(repositoryNameWithOwner),
@@ -524,8 +485,9 @@ export const makeGitManager = Effect.gen(function* () {
             remoteName !== "origin" &&
             remoteRepository.repositoryNameWithOwner !== null;
 
-      // Azure DevOps does not use owner:branch style selectors
-      const useOwnerSelectors = provider === "github";
+      // Only some providers (e.g. GitHub) use owner:branch style head selectors for cross-repo PRs
+      const providerRegistration = getProviderRegistration(provider);
+      const useOwnerSelectors = providerRegistration?.usesOwnerHeadSelectors ?? false;
 
       const ownerHeadSelector =
         useOwnerSelectors && remoteRepository.ownerLogin && headBranch.length > 0
