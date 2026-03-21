@@ -30,6 +30,8 @@ import { KeybindingsLive } from "./keybindings";
 import { GitManagerLive } from "./git/Layers/GitManager";
 import { GitCoreLive } from "./git/Layers/GitCore";
 import { GitHubCliLive } from "./git/Layers/GitHubCli";
+import { AzureDevOpsCliLive } from "./git/Layers/AzureDevOpsCli";
+import { GitHostingCliLive } from "./git/Layers/GitHostingCliResolver";
 import { CodexTextGenerationLive } from "./git/Layers/CodexTextGeneration";
 import { GitServiceLive } from "./git/Layers/GitService";
 import { BunPtyAdapterLive } from "./terminal/Layers/BunPTY";
@@ -116,9 +118,15 @@ export function makeServerRuntimeServicesLayer() {
     ),
   );
 
-  const gitManagerLayer = GitManagerLive.pipe(
+  const hostingCliLayer = GitHostingCliLive.pipe(
     Layer.provideMerge(gitCoreLayer),
     Layer.provideMerge(GitHubCliLive),
+    Layer.provideMerge(AzureDevOpsCliLive),
+  );
+
+  const gitManagerLayer = GitManagerLive.pipe(
+    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(hostingCliLayer),
     Layer.provideMerge(textGenerationLayer),
   );
 

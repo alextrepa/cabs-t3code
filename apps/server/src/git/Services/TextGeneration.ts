@@ -39,6 +39,8 @@ export interface PrContentGenerationInput {
   diffPatch: string;
   /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
   model?: string;
+  /** Optional PR template content. When provided, the body should follow the template structure. */
+  template?: string;
 }
 
 export interface PrContentGenerationResult {

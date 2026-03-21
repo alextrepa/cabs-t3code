@@ -45,6 +45,27 @@ export class TextGenerationError extends Schema.TaggedErrorClass<TextGenerationE
 }
 
 /**
+ * AzureDevOpsCliError - Azure DevOps CLI execution or authentication failed.
+ */
+export class AzureDevOpsCliError extends Schema.TaggedErrorClass<AzureDevOpsCliError>()(
+  "AzureDevOpsCliError",
+  {
+    operation: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message(): string {
+    return `Azure DevOps CLI failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
+/**
+ * GitHostingCliError - Unified hosting CLI error (GitHub or Azure DevOps).
+ */
+export type GitHostingCliError = GitHubCliError | AzureDevOpsCliError;
+
+/**
  * GitManagerError - Stacked Git workflow orchestration failed.
  */
 export class GitManagerError extends Schema.TaggedErrorClass<GitManagerError>()("GitManagerError", {
@@ -64,4 +85,5 @@ export type GitManagerServiceError =
   | GitManagerError
   | GitCommandError
   | GitHubCliError
+  | AzureDevOpsCliError
   | TextGenerationError;

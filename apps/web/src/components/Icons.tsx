@@ -309,3 +309,12 @@ export const OpenCodeIcon: Icon = (props) => (
     </defs>
   </svg>
 );
+
+export const AzureDevOpsIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 18 18" fill="none">
+    <path
+      d="M17 3.803v10.289l-5.072 3.908L6.49 16.085V18L1 14.434l12.27-1.673V1l3.73 2.803zM12.07 5.196L5.49 1v2.77L1.368 5.16 0 6.847v5.025l2.49 1.078V6.16l9.58-.964z"
+      fill="currentColor"
+    />
+  </svg>
+);

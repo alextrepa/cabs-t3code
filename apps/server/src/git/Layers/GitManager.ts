@@ -11,8 +11,9 @@ import {
 import { GitManagerError } from "../Errors.ts";
 import { GitManager, type GitManagerShape } from "../Services/GitManager.ts";
 import { GitCore } from "../Services/GitCore.ts";
-import { GitHubCli } from "../Services/GitHubCli.ts";
+import { GitHostingCli } from "../Services/GitHostingCli.ts";
 import { TextGeneration } from "../Services/TextGeneration.ts";
+import { detectHostingProvider } from "../hosting.ts";
 
 interface OpenPrInfo {
   number: number;
@@ -105,6 +106,36 @@ function parseGitHubRepositoryNameWithOwnerFromRemoteUrl(url: string | null): st
     );
   const repositoryNameWithOwner = match?.[1]?.trim() ?? "";
   return repositoryNameWithOwner.length > 0 ? repositoryNameWithOwner : null;
+}
+
+function parseRepositoryNameWithOwnerFromRemoteUrl(url: string | null): string | null {
+  // Try GitHub first
+  const github = parseGitHubRepositoryNameWithOwnerFromRemoteUrl(url);
+  if (github) return github;
+
+  // Try Azure DevOps: extract project/repo as nameWithOwner equivalent
+  const trimmed = url?.trim() ?? "";
+  if (trimmed.length === 0) return null;
+
+  // https://dev.azure.com/{org}/{project}/_git/{repo}
+  const azureHttps =
+    /^https?:\/\/(?:[^@]+@)?dev\.azure\.com\/[^/]+\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?\/?$/i.exec(
+      trimmed,
+    );
+  if (azureHttps) return `${azureHttps[1]}/${azureHttps[2]}`;
+
+  // git@ssh.dev.azure.com:v3/{org}/{project}/{repo}
+  const azureSsh = /^git@ssh\.dev\.azure\.com:v3\/[^/]+\/([^/]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(
+    trimmed,
+  );
+  if (azureSsh) return `${azureSsh[1]}/${azureSsh[2]}`;
+
+  // https://{org}.visualstudio.com/{project}/_git/{repo}
+  const azureVsts =
+    /^https?:\/\/[^.]+\.visualstudio\.com\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?\/?$/i.exec(trimmed);
+  if (azureVsts) return `${azureVsts[1]}/${azureVsts[2]}`;
+
+  return null;
 }
 
 function parseRepositoryOwnerLogin(nameWithOwner: string | null): string | null {
@@ -334,7 +365,7 @@ function toPullRequestHeadRemoteInfo(pr: {
 
 export const makeGitManager = Effect.gen(function* () {
   const gitCore = yield* GitCore;
-  const gitHubCli = yield* GitHubCli;
+  const hostingCli = yield* GitHostingCli;
   const textGeneration = yield* TextGeneration;
 
   const configurePullRequestHeadUpstream = (
@@ -348,7 +379,7 @@ export const makeGitManager = Effect.gen(function* () {
         return;
       }
 
-      const cloneUrls = yield* gitHubCli.getRepositoryCloneUrls({
+      const cloneUrls = yield* hostingCli.getRepositoryCloneUrls({
         cwd,
         repository: repositoryNameWithOwner,
       });
@@ -395,7 +426,7 @@ export const makeGitManager = Effect.gen(function* () {
         return;
       }
 
-      const cloneUrls = yield* gitHubCli.getRepositoryCloneUrls({
+      const cloneUrls = yield* hostingCli.getRepositoryCloneUrls({
         cwd,
         repository: repositoryNameWithOwner,
       });
@@ -450,12 +481,17 @@ export const makeGitManager = Effect.gen(function* () {
       }
 
       const remoteUrl = yield* readConfigValueNullable(cwd, `remote.${remoteName}.url`);
-      const repositoryNameWithOwner = parseGitHubRepositoryNameWithOwnerFromRemoteUrl(remoteUrl);
+      const repositoryNameWithOwner = parseRepositoryNameWithOwnerFromRemoteUrl(remoteUrl);
       return {
         repositoryNameWithOwner,
         ownerLogin: parseRepositoryOwnerLogin(repositoryNameWithOwner),
       };
     });
+
+  const resolveHostingProvider = (cwd: string) =>
+    readConfigValueNullable(cwd, "remote.origin.url").pipe(
+      Effect.map((url) => detectHostingProvider(url)),
+    );
 
   const resolveBranchHeadContext = (
     cwd: string,
@@ -468,6 +504,8 @@ export const makeGitManager = Effect.gen(function* () {
         : "";
       const headBranch =
         headBranchFromUpstream.length > 0 ? headBranchFromUpstream : details.branch;
+
+      const provider = yield* resolveHostingProvider(cwd);
 
       const [remoteRepository, originRepository] = yield* Effect.all(
         [
@@ -486,14 +524,20 @@ export const makeGitManager = Effect.gen(function* () {
             remoteName !== "origin" &&
             remoteRepository.repositoryNameWithOwner !== null;
 
+      // Azure DevOps does not use owner:branch style selectors
+      const useOwnerSelectors = provider === "github";
+
       const ownerHeadSelector =
-        remoteRepository.ownerLogin && headBranch.length > 0
+        useOwnerSelectors && remoteRepository.ownerLogin && headBranch.length > 0
           ? `${remoteRepository.ownerLogin}:${headBranch}`
           : null;
       const remoteAliasHeadSelector =
-        remoteName && headBranch.length > 0 ? `${remoteName}:${headBranch}` : null;
+        useOwnerSelectors && remoteName && headBranch.length > 0
+          ? `${remoteName}:${headBranch}`
+          : null;
       const shouldProbeRemoteOwnedSelectors =
-        isCrossRepository || (remoteName !== null && remoteName !== "origin");
+        useOwnerSelectors &&
+        (isCrossRepository || (remoteName !== null && remoteName !== "origin"));
 
       const headSelectors: string[] = [];
       if (isCrossRepository && shouldProbeRemoteOwnedSelectors) {
@@ -529,7 +573,7 @@ export const makeGitManager = Effect.gen(function* () {
   const findOpenPr = (cwd: string, headSelectors: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       for (const headSelector of headSelectors) {
-        const pullRequests = yield* gitHubCli.listOpenPullRequests({
+        const pullRequests = yield* hostingCli.listOpenPullRequests({
           cwd,
           headSelector,
           limit: 1,
@@ -558,7 +602,7 @@ export const makeGitManager = Effect.gen(function* () {
       const parsedByNumber = new Map<number, PullRequestInfo>();
 
       for (const headSelector of headContext.headSelectors) {
-        const stdout = yield* gitHubCli
+        const stdout = yield* hostingCli
           .execute({
             cwd,
             args: [
@@ -622,7 +666,7 @@ export const makeGitManager = Effect.gen(function* () {
         }
       }
 
-      const defaultFromGh = yield* gitHubCli
+      const defaultFromGh = yield* hostingCli
         .getDefaultBranch({ cwd })
         .pipe(Effect.catch(() => Effect.succeed(null)));
       if (defaultFromGh) {
@@ -745,6 +789,22 @@ export const makeGitManager = Effect.gen(function* () {
       const baseBranch = yield* resolveBaseBranch(cwd, branch, details.upstreamRef, headContext);
       const rangeContext = yield* gitCore.readRangeContext(cwd, baseBranch);
 
+      // Load PR template if it exists (provider-specific path)
+      const provider = yield* resolveHostingProvider(cwd).pipe(
+        Effect.catch(() => Effect.succeed("github" as const)),
+      );
+      const templatePath =
+        provider === "azure-devops"
+          ? path.join(cwd, ".azuredevops", "pull_request_template.md")
+          : path.join(cwd, ".github", "pull_request_template.md");
+      const prTemplate = yield* fileSystem.readFileString(templatePath).pipe(
+        Effect.map((content) => {
+          const trimmed = content.trim();
+          return trimmed.length > 0 ? trimmed : undefined;
+        }),
+        Effect.catch(() => Effect.succeed(undefined)),
+      );
+
       const generated = yield* textGeneration.generatePrContent({
         cwd,
         baseBranch,
@@ -753,6 +813,7 @@ export const makeGitManager = Effect.gen(function* () {
         diffSummary: limitContext(rangeContext.diffSummary, 20_000),
         diffPatch: limitContext(rangeContext.diffPatch, 60_000),
         ...(model ? { model } : {}),
+        ...(prTemplate ? { template: prTemplate } : {}),
       });
 
       const bodyFile = path.join(tempDir, `t3code-pr-body-${process.pid}-${randomUUID()}.md`);
@@ -763,7 +824,7 @@ export const makeGitManager = Effect.gen(function* () {
             gitManagerError("runPrStep", "Failed to write pull request body temp file.", cause),
           ),
         );
-      yield* gitHubCli
+      yield* hostingCli
         .createPullRequest({
           cwd,
           baseBranch,
@@ -796,6 +857,10 @@ export const makeGitManager = Effect.gen(function* () {
   const status: GitManagerShape["status"] = Effect.fnUntraced(function* (input) {
     const details = yield* gitCore.statusDetails(input.cwd);
 
+    const provider = yield* resolveHostingProvider(input.cwd).pipe(
+      Effect.catch(() => Effect.succeed("github" as const)),
+    );
+
     const pr =
       details.branch !== null
         ? yield* findLatestPr(input.cwd, {
@@ -809,6 +874,7 @@ export const makeGitManager = Effect.gen(function* () {
 
     return {
       branch: details.branch,
+      hostingProvider: provider,
       hasWorkingTreeChanges: details.hasWorkingTreeChanges,
       workingTree: details.workingTree,
       hasUpstream: details.hasUpstream,
@@ -820,7 +886,7 @@ export const makeGitManager = Effect.gen(function* () {
 
   const resolvePullRequest: GitManagerShape["resolvePullRequest"] = Effect.fnUntraced(
     function* (input) {
-      const pullRequest = yield* gitHubCli
+      const pullRequest = yield* hostingCli
         .getPullRequest({
           cwd: input.cwd,
           reference: normalizePullRequestReference(input.reference),
@@ -835,14 +901,14 @@ export const makeGitManager = Effect.gen(function* () {
     function* (input) {
       const normalizedReference = normalizePullRequestReference(input.reference);
       const rootWorktreePath = canonicalizeExistingPath(input.cwd);
-      const pullRequestSummary = yield* gitHubCli.getPullRequest({
+      const pullRequestSummary = yield* hostingCli.getPullRequest({
         cwd: input.cwd,
         reference: normalizedReference,
       });
       const pullRequest = toResolvedPullRequest(pullRequestSummary);
 
       if (input.mode === "local") {
-        yield* gitHubCli.checkoutPullRequest({
+        yield* hostingCli.checkoutPullRequest({
           cwd: input.cwd,
           reference: normalizedReference,
           force: true,

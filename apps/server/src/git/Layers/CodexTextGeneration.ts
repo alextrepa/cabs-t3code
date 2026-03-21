@@ -371,14 +371,27 @@ const makeCodexTextGeneration = Effect.gen(function* () {
   };
 
   const generatePrContent: TextGenerationShape["generatePrContent"] = (input) => {
+    const templateInstructions = input.template
+      ? [
+          "",
+          "A PR template is provided below. Fill in each section of the template with relevant content from the changes.",
+          "Preserve the template headings and structure. Replace placeholder text with actual content.",
+          "",
+          "PR Template:",
+          limitSection(input.template, 8_000),
+        ]
+      : [
+          "- body must be markdown and include headings '## Summary' and '## Testing'",
+          "- under Summary, provide short bullet points",
+          "- under Testing, include bullet points with concrete checks or 'Not run' where appropriate",
+        ];
+
     const prompt = [
-      "You write GitHub pull request content.",
+      "You write pull request content.",
       "Return a JSON object with keys: title, body.",
       "Rules:",
       "- title should be concise and specific",
-      "- body must be markdown and include headings '## Summary' and '## Testing'",
-      "- under Summary, provide short bullet points",
-      "- under Testing, include bullet points with concrete checks or 'Not run' where appropriate",
+      ...templateInstructions,
       "",
       `Base branch: ${input.baseBranch}`,
       `Head branch: ${input.headBranch}`,

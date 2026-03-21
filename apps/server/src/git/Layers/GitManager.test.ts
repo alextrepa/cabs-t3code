@@ -12,8 +12,8 @@ import { type GitManagerShape } from "../Services/GitManager.ts";
 import {
   type GitHubCliShape,
   type GitHubPullRequestSummary,
-  GitHubCli,
 } from "../Services/GitHubCli.ts";
+import { GitHostingCli, type GitHostingCliShape } from "../Services/GitHostingCli.ts";
 import { type TextGenerationShape, TextGeneration } from "../Services/TextGeneration.ts";
 import { GitServiceLive } from "./GitService.ts";
 import { GitService } from "../Services/GitService.ts";
@@ -485,8 +485,20 @@ function makeManager(input?: {
     Layer.provideMerge(ServerConfigLayer),
   );
 
+  // Wrap the fake GitHubCli as a GitHostingCli (default to github provider)
+  const hostingCli: GitHostingCliShape = {
+    provider: "github",
+    execute: gitHubCli.execute,
+    listOpenPullRequests: gitHubCli.listOpenPullRequests,
+    getPullRequest: gitHubCli.getPullRequest,
+    getRepositoryCloneUrls: gitHubCli.getRepositoryCloneUrls,
+    createPullRequest: gitHubCli.createPullRequest,
+    getDefaultBranch: gitHubCli.getDefaultBranch,
+    checkoutPullRequest: gitHubCli.checkoutPullRequest,
+  };
+
   const managerLayer = Layer.mergeAll(
-    Layer.succeed(GitHubCli, gitHubCli),
+    Layer.succeed(GitHostingCli, hostingCli),
     Layer.succeed(TextGeneration, textGeneration),
     gitCoreLayer,
   ).pipe(Layer.provideMerge(NodeServices.layer));
